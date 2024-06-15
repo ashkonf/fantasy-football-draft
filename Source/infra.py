@@ -1,251 +1,234 @@
 import os
-import sys
 import re
 import bs4
-import ntpath
-
 import numpy
-
-import ashlib.util.file_
-import ashlib.util.dir_
-import ashlib.util.str_
-
-import util
 import settings
+import util
 
-# ESPN rankings link: http://www.espn.com/fantasy/football/story/_/page/18RanksPreseason300nonPPR/2018-fantasy-football-non-ppr-rankings-top-300
-# ESPN projected ppg link: http://games.espn.com/ffl/tools/projections?leagueId=1160162
-# FantasyPros rankings link: https://www.fantasypros.com/nfl/rankings/consensus-cheatsheets.php
-# FantasyPros projected ppg link: https://www.fantasypros.com/nfl/projections/qb.php?week=draft
+DATA_DIR_PATH = os.path.join(os.path.dirname(__file__), "..", "Data")
 
-DATA_DIR_PATH = os.path.join("..", "Data")
 
-class Player(object):
-    
+class Player:
     def __init__(self, name, position=None, team=None):
         self.name = name
         self.position = position
         self.team = team
-        
         self.rank_map = {}
         self.position_rank_map = {}
         self.projected_ppg_map = {}
-        
+
     def set_rank(self, source, rank):
         self.rank_map[source] = rank
-        
+
     def set_position_rank(self, source, position_rank):
         self.position_rank_map[source] = position_rank
-        
+
     def set_projected_ppg(self, source, projected_ppg):
         self.projected_ppg_map[source] = projected_ppg
-        
+
     def get_rank(self, source):
-        if source in self.rank_map: return self.rank_map[source]
-        else: return None
-        
+        return self.rank_map.get(source)
+
     def get_position_rank(self, source):
-        if source in self.position_rank_map: return self.position_rank_map[source]
-        else: return None
-        
+        return self.position_rank_map.get(source)
+
     def get_projected_ppg(self, source):
-        if source in self.projected_ppg_map: return self.projected_ppg_map[source] 
-        else: return None
-    
+        return self.projected_ppg_map.get(source)
+
     def get_average_projected_ppg(self):
-        return sum(self.projected_ppg_map.values()) / len(self.projected_ppg_map)
-        
+        return numpy.mean(list(self.projected_ppg_map.values()))
+
     def merge(self, other):
         if settings.VERBOSE:
-            print "Merging %s and %s" % (self.name, other.name)
-        
+            print(f"Merging {self.name} and {other.name}")
+
         self.position = self.position or other.position
-        self.team = self.team or other.team 
-        
-        for source in other.rank_map:
-            self.set_rank(source, other.get_rank(source))
-        for source in other.position_rank_map:
-            self.set_position_rank(source, other.get_position_rank(source))
-        for source in other.projected_ppg_map:
-            self.set_projected_ppg(source, other.get_projected_ppg(source))
-        
+        self.team = self.team or other.team
+
+        for source, rank in other.rank_map.items():
+            self.set_rank(source, rank)
+        for source, position_rank in other.position_rank_map.items():
+            self.set_position_rank(source, position_rank)
+        for source, projected_ppg in other.projected_ppg_map.items():
+            self.set_projected_ppg(source, projected_ppg)
+
     def __repr__(self):
-        return "%s(\n\tname = %s, \n\tposition = %s, \n\tteam = %s, \n\trank = %s, \n\tposition rank =% s, \n\tprojected ppg = %s\n)"% (self.__class__.__name__, self.name, self.position, self.team, self.rank_map, self.position_rank_map, self.projected_ppg_map)
-    
+        return (
+            f"{self.__class__.__name__}(\n"
+            f"\tname = {self.name}, \n"
+            f"\tposition = {self.position}, \n"
+            f"\tteam = {self.team}, \n"
+            f"\trank = {self.rank_map}, \n"
+            f"\tposition rank = {self.position_rank_map}, \n"
+            f"\tprojected ppg = {self.projected_ppg_map}\n"
+            ")"
+        )
+
     def similarity(self, other):
         def simplify(name):
-            name = name.replace(" Jr.", "")
-            name = name.replace(" sr.", "")
-            name = name.replace(" II", "")
-            name = name.replace(" III", "")
-            name = name.replace(" D/STD/ST", "")
-            name = name.replace(" D/ST", "")
-            
-            name = name.replace("Jacksonville ", "")
-            name = name.replace("Minnesota ", "")
-            name = name.replace("Philadelphia ", "")
-            name = name.replace("Houston ", "")
-            name = name.replace("Los Angeles ", "")
-            name = name.replace("Baltimore ", "")
-            name = name.replace("Denver ", "")
-            name = name.replace("Seattle ", "")
-            name = name.replace("New England ", "")
-            name = name.replace("Carolina ", "")
-            name = name.replace("Pittsburgh ", "")
-            name = name.replace("Carolina ", "")
-            name = name.replace("Kansas City ", "")
-            name = name.replace("Chicago ", "")
-            name = name.replace("Atlanta ", "")
-            name = name.replace("Arizona ", "")
-            name = name.replace("Green Bay ", "")
-            name = name.replace("New York ", "")
-            name = name.replace("Tennessee ", "")
-            name = name.replace("Detroit ", "")
-            name = name.replace("Buffalo ", "")
-            name = name.replace("New Orleans ", "")
-            name = name.replace("San Francisco ", "")
-            name = name.replace("Washington ", "")
-            name = name.replace("Cleveland ", "")
-            name = name.replace("Cincinnati ", "")
-            name = name.replace("Dallas ", "")
-            name = name.replace("Houston ", "")
-            name = name.replace("Indianapolis ", "")
-            name = name.replace("Miami ", "")
-            name = name.replace("Oakland ", "")
-            name = name.replace("Tampa Bay ", "")
-            
+            # General name simplifications
+            name = re.sub(r" (Jr\.|Sr\.|II|III)$", "", name)
+            # D/ST simplifications
+            name = name.replace(" D/ST", "").replace(" D/STD/ST", "")
+            # Team name simplifications
+            for team_name in settings.TEAM_NAMES:
+                name = name.replace(f"{team_name} ", "")
             return name
 
-        if self.name == other.name: return 0.0
-        elif simplify(self.name) == other.name: return 1.0
-        elif simplify(other.name) == self.name: return 1.0
-        elif simplify(other.name) == simplify(self.name): return 2.0
-        else: return float("inf")
+        if self.name == other.name:
+            return 0.0
         
+        simplified_self = simplify(self.name)
+        simplified_other = simplify(other.name)
+
+        if simplified_self == other.name or simplified_other == self.name:
+            return 1.0
+        if simplified_self == simplified_other:
+            return 2.0
+        
+        return float("inf")
+
     def find_match(self, players):
-        if len(players) > 0:
-            similarities = [(other, self.similarity(other)) for other in players]
-            match = min(similarities, key=lambda pair: pair[1])
-            if match[1] < float("inf"):
-                return match[0]
-        return None
+        if not players:
+            return None
         
+        similarities = [(other, self.similarity(other)) for other in players]
+        match = min(similarities, key=lambda pair: pair[1])
+        
+        return match[0] if match[1] != float("inf") else None
+
     @classmethod
     def from_rankings_row(cls, row):
         raise NotImplementedError("Subclasses should override.")
-        
+
     @classmethod
     def from_ppg_row(cls, row):
         raise NotImplementedError("Subclasses should override.")
-        
+
+
 class ESPNPlayer(Player):
-    
     @classmethod
     def from_rankings_row(cls, row):
-        rank_name = row.find_all("td")[0].get_text()
+        cells = row.find_all("td")
+        rank_name = cells[0].get_text()
         rank = int(rank_name.split(".")[0])
-        name = rank_name[rank_name.find(".") + 2:]
-        position = row.find_all("td")[1].get_text()
-        team = abbreviation=row.find_all("td")[2].get_text()
-        position_rank = int(re.search("[A-Z]+(\d+)", row.find_all("td")[3].get_text()).groups()[0])
+        name = rank_name.split(". ", 1)[1]
+        position = cells[1].get_text()
+        team = cells[2].get_text()
+        position_rank_text = cells[3].get_text()
+        position_rank = int(re.search(r"[A-Z]+(\d+)", position_rank_text).group(1))
+        
         player = cls(name, position, team)
-        player.set_rank(ESPN, rank)
-        player.set_position_rank(ESPN, position_rank)
-        return player
-    
-    @classmethod
-    def from_ppg_row(cls, row):
-        name = ashlib.util.str_.aggressivelySanitize(row.find_all("td")[1].get_text()).split(",")[0]
-        projected_ppg = float(row.find_all("td")[-1].get_text())
-        player = cls(name)
-        player.set_projected_ppg(ESPN, projected_ppg)
-        return player
-    
-class FantasyProsPlayer(Player):
-    
-    @classmethod
-    def from_rankings_row(cls, row):
-        rank = int(row.find_all("td")[0].get_text())
-        name = row.find("td", class_="player-label").find("span", class_="full-name").get_text()
-        position = re.search("([A-Z]+)\d+", row.find_all("td")[3].get_text()).groups()[0]
-        team_tag = row.find("td", class_="player-label").find("small", class_="grey")
-        if team_tag is None:
-            team = None
-        else:
-            team = row.find("td", class_="player-label").find("small", class_="grey").get_text()
-        position_rank = int(re.search("[A-Z]+(\d+)", row.find_all("td")[3].get_text()).groups()[0])
-        player = cls(name, position, team)
-        player.set_rank(FantasyPros, rank)
-        player.set_position_rank(FantasyPros, position_rank)
-        return player
-    
-    @classmethod
-    def from_ppg_row(cls, row):
-        name = row.find("td", class_="player-label").find("a").get_text()
-        ppg = float(row.find_all("td")[-1].get_text())
-        player = cls(name)
-        player.set_projected_ppg(FantasyPros, ppg)
+        player.set_rank("ESPN", rank)
+        player.set_position_rank("ESPN", position_rank)
         return player
 
-class FantasyDataSource(object):
-    
+    @classmethod
+    def from_ppg_row(cls, row):
+        cells = row.find_all("td")
+        name_text = util.aggressively_sanitize(cells[1].get_text())
+        name = name_text.split(",")[0]
+        projected_ppg = float(cells[-1].get_text())
+        
+        player = cls(name)
+        player.set_projected_ppg("ESPN", projected_ppg)
+        return player
+
+
+class FantasyProsPlayer(Player):
+    @classmethod
+    def from_rankings_row(cls, row):
+        cells = row.find_all("td")
+        rank = int(cells[0].get_text())
+        player_label = cells[1]
+        name = player_label.find("span", class_="full-name").get_text()
+        position = re.search(r"([A-Z]+)\d+", cells[3].get_text()).group(1)
+        team_tag = player_label.find("small", class_="grey")
+        team = team_tag.get_text() if team_tag else None
+        position_rank = int(re.search(r"[A-Z]+(\d+)", cells[3].get_text()).group(1))
+        
+        player = cls(name, position, team)
+        player.set_rank("FantasyPros", rank)
+        player.set_position_rank("FantasyPros", position_rank)
+        return player
+
+    @classmethod
+    def from_ppg_row(cls, row):
+        player_label = row.find("td", class_="player-label")
+        name = player_label.find("a").get_text()
+        ppg = float(row.find_all("td")[-1].get_text())
+        
+        player = cls(name)
+        player.set_projected_ppg("FantasyPros", ppg)
+        return player
+
+
+class FantasyDataSource:
     def __init__(self):
         self.dir_path = os.path.join(DATA_DIR_PATH, self.__class__.__name__)
-        
+
     def __repr__(self):
         return self.__class__.__name__
-    
+
     def parse_rankings(self):
         html_file_path = os.path.join(self.dir_path, "Rankings.htm")
-        html = ashlib.util.file_.read(html_file_path)
+        with open(html_file_path, "r", encoding="utf-8") as f:
+            html = f.read()
         soup = bs4.BeautifulSoup(html, "html5lib")
         return self._parse_rankings(soup)
-        
+
     def _parse_rankings(self, soup):
         raise NotImplementedError("Subclasses should override.")
-        
+
     def parse_ppg(self):
         players = []
-        for html_file_path in ashlib.util.dir_.listStdDir(os.path.join(self.dir_path, "Projections")):
-            if html_file_path.endswith(".html") or html_file_path.endswith(".htm"):
-                html = ashlib.util.file_.read(html_file_path)
+        projections_path = os.path.join(self.dir_path, "Projections")
+        for filename in os.listdir(projections_path):
+            if filename.endswith((".html", ".htm")):
+                html_file_path = os.path.join(projections_path, filename)
+                with open(html_file_path, "r", encoding="utf-8") as f:
+                    html = f.read()
                 soup = bs4.BeautifulSoup(html, "html5lib")
                 players.extend(self._parse_ppg(soup))
         return players
-    
+
     def _parse_ppg(self, soup):
         raise NotImplementedError("Subclasses should override.")
-    
+
+
 class ESPN(FantasyDataSource):
-    
     def _parse_rankings(self, soup):
         players = []
-        for row in soup.find_all("table", class_="inline-table")[1].find_all("tr")[1:]:
+        table = soup.find_all("table", class_="inline-table")[1]
+        for row in table.find_all("tr")[1:]:
             player = ESPNPlayer.from_rankings_row(row)
             players.append(player)
         return players
-    
+
     def _parse_ppg(self, soup):
         players = []
-        for row in soup.find("table", class_="playerTableTable tableBody").find_all("tr")[2:]:
+        table = soup.find("table", class_="playerTableTable tableBody")
+        for row in table.find_all("tr")[2:]:
             player = ESPNPlayer.from_ppg_row(row)
             players.append(player)
         return players
-    
+
+
 class FantasyPros(FantasyDataSource):
-    
     def _parse_rankings(self, soup):
         players = []
-        for row in soup.find("table", class_="table table-bordered table-striped player-table table-hover pad-below tablesorter").find_all("tr")[2:]:
-            if not row.get_text().startswith("Tier") and len(row.find_all("td")) == 11:
+        table = soup.find("table", class_="table-bordered")
+        for row in table.find_all("tr")[2:]:
+            if "Tier" not in row.get_text() and len(row.find_all("td")) == 11:
                 player = FantasyProsPlayer.from_rankings_row(row)
                 players.append(player)
         return players
-    
+
     def _parse_ppg(self, soup):
         players = []
+        table = soup.find("table", class_="table-bordered")
         should_ignore = True
-        for row in soup.find("table", class_="table table-bordered table-striped table-hover tablesorter").find_all("tr")[1:]:
+        for row in table.find_all("tr")[1:]:
             if should_ignore:
                 if "Player" in row.get_text():
                     should_ignore = False
@@ -253,32 +236,29 @@ class FantasyPros(FantasyDataSource):
                 player = FantasyProsPlayer.from_ppg_row(row)
                 players.append(player)
         return players
-        
-SOURCES = [
-    ESPN,
-    FantasyPros
-]
+
+
+SOURCES = [ESPN, FantasyPros]
+
 
 def load_players():
     players = []
-
-    count = 0
     for source_class in SOURCES:
         source = source_class()
         for player in source.parse_rankings() + source.parse_ppg():
-            count += 1
             old_player = player.find_match(players)
-            if old_player is not None:
+            if old_player:
                 old_player.merge(player)
             else:
                 players.append(player)
-
     return players
+
 
 def main():
     for player in load_players():
-        print player
-        print
+        print(player)
+        print()
+
 
 if __name__ == "__main__":
     main()
