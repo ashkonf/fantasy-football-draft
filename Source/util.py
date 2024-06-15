@@ -1,8 +1,3 @@
-import os
-import sys
-import re
-import bs4
-import ntpath
 import itertools
 
 import numpy
