@@ -1,51 +1,39 @@
 import os
-import sys
 import re
 import json
 import collections
 import math
 import copy
+import itertools
 
 import scipy.stats
-import matplotlib
-import matplotlib.pyplot
+import matplotlib.pyplot as plt
 import numpy
-
-import ashlib.util.list_
-
-import util
-
-# TODO: provide more customizability to client. Callback function may help. Probably need more arbitrary formatting options as well.
 
 DEFAULT_COLORS = ["blue", "green", "red", "yellow", "orange", "purple"]
 
-class Point(object):
-
+class Point:
     def __init__(self, x_value, y_value, label=None):
         self.x_value = x_value
         self.y_value = y_value
         self.label = label
 
     def __repr__(self):
-        return "%s(\n\tx value = %s, \n\ty value = %s\n\tlabel = %s\n)"% (self.__class__.__name__, self.x_value, self.y_value, self.label)
+        return f"{self.__class__.__name__}(x={self.x_value}, y={self.y_value}, label={self.label})"
 
-class PointSet(util.ListWrapper):
-
+class PointSet(list):
     def __init__(self, name, color=None, points=None, add_regression_line=False, additional_charting_behavior=None):
+        super().__init__(points or [])
         self.name = name
         self.color = color
-        
-        if points is None: points = []
-        for point in points:
-            assert(isinstance(point, Point))
-        super(PointSet, self).__init__(points)
-
         self.add_regression_line = add_regression_line
         self.additional_charting_behavior = additional_charting_behavior
+        for point in self:
+            assert isinstance(point, Point)
 
     def append(self, point):
-        assert(isinstance(point, Point))
-        super(PointSet, self).append(point)
+        assert isinstance(point, Point)
+        super().append(point)
 
     def x_values(self):
         return [point.x_value for point in self]
@@ -54,107 +42,94 @@ class PointSet(util.ListWrapper):
         return [point.y_value for point in self]
 
     def add_points_from_lists(self, x_values, y_values, labels=None):
-        assert(len(x_values) == len(y_values))
-        if labels is not None:
-            assert(len(labels) == len(y_values))
-
-        for index in range(len(x_values)):
-            label = labels[index] if labels is not None else None
-            self.append(Point(x_values[index], y_values[index], label=label))
-
+        assert len(x_values) == len(y_values)
+        if labels:
+            assert len(labels) == len(y_values)
+        
+        for i, (x, y) in enumerate(zip(x_values, y_values)):
+            label = labels[i] if labels else None
+            self.append(Point(x, y, label=label))
         return self
 
     def __repr__(self):
-        return "%s(\n\tx name = %s, \n\ty points = %s\n)"% (self.__class__.__name__, self.name, super(PointSet, self).__repr__())
+        return f"{self.__class__.__name__}(name={self.name}, points={super().__repr__()})"
 
-class ScatterPlotData(util.ListWrapper):
-
+class ScatterPlotData(list):
     def __init__(self, point_sets=None):
-        if point_sets is None: point_sets = []
-        for point_set in point_sets:
-            assert(isinstance(point_set, PointSet))
-        assert(len(set(point_set.name for point_set in point_sets)) == len(point_sets)) # ensure names are unique
-        super(ScatterPlotData, self).__init__(point_sets)
+        super().__init__(point_sets or [])
+        for ps in self:
+            assert isinstance(ps, PointSet)
+        assert len(set(ps.name for ps in self)) == len(self), "Point set names must be unique"
 
     def append(self, point_set):
-        assert(isinstance(point_set, PointSet))
-        assert(point_set.name not in [other_point_set.name for other_point_set in self]) # ensure names are unique
-        super(ScatterPlotData, self).append(point_set)
+        assert isinstance(point_set, PointSet)
+        assert point_set.name not in [ps.name for ps in self], "Point set name must be unique"
+        super().append(point_set)
     
     def add_point(self, point, set_name):
-        def matching_point_set(set_name):
-            for point_set in self:
-                if point_set.name == set_name:
-                    return point_set
-            raise ValueError("Point set not found: %s" % (set_name,))
-        
-        matching_point_set(set_name).append(point)
-
+        for ps in self:
+            if ps.name == set_name:
+                ps.append(point)
+                return
+        raise ValueError(f"Point set not found: {set_name}")
+    
     def all_points(self):
-        return util.concatenate_lists(self)
+        return list(itertools.chain.from_iterable(self))
 
 def plot(points, x_label=None, y_label=None, chart_title=None, show_vs_save=True, output_dir_path=None):
-    matplotlib.pyplot.clf()
-    matplotlib.pyplot.figure(figsize=(17, 10))
+    plt.clf()
+    plt.figure(figsize=(17, 10))
     
-    x_min = min(point.x_value for point in points.all_points())
-    x_max = max(point.x_value for point in points.all_points())
-    x_range = float(x_max) - float(x_min)
+    all_points = points.all_points()
+    x_min, x_max = min(p.x_value for p in all_points), max(p.x_value for p in all_points)
+    y_min, y_max = min(p.y_value for p in all_points), max(p.y_value for p in all_points)
+    x_range, y_range = float(x_max - x_min), float(y_max - y_min)
     x_step = x_range / 25.0
     
-    y_min = min(point.y_value for point in points.all_points())
-    y_max = max(point.y_value for point in points.all_points())
-    y_range = float(y_max) - float(y_min)
-    
-    # Include a buffer of 20% the range size on every side:
-    matplotlib.pyplot.axis([x_min - x_range * 0.2, x_max + x_range * 0.2, y_min - y_range * 0.2, y_max + y_range * 0.2])
+    plt.axis([
+        x_min - x_range * 0.2, x_max + x_range * 0.2,
+        y_min - y_range * 0.2, y_max + y_range * 0.2
+    ])
     
     default_colors = copy.deepcopy(DEFAULT_COLORS)
     
     for point_set in points:
-        # Determine appropriate color:
-        if point_set.color is not None:
-            color = point_set.color
-        else:
-            if len(default_colors) == 0:
-                raise ValueError("Too many point sets without colors provided. Ran out of default colors.")
-            color = default_colors[0]
-            del default_colors[0]
+        color = point_set.color
+        if not color:
+            if not default_colors:
+                raise ValueError("Too many point sets; ran out of default colors.")
+            color = default_colors.pop(0)
         
-        # Scatter plot:
-        matplotlib.pyplot.scatter(point_set.x_values(), point_set.y_values(), s=100.0, alpha=0.25, c=color, label=point_set.name)
+        plt.scatter(point_set.x_values(), point_set.y_values(), s=100.0, alpha=0.25, c=color, label=point_set.name)
         for point in point_set:
-            if point.label is not None:
-                fontdict={"fontsize": 6, "horizontalalignment": "center", "color": color}
-                matplotlib.pyplot.text(point.x_value, point.y_value, point.label, fontdict=fontdict)
+            if point.label:
+                fontdict = {"fontsize": 6, "horizontalalignment": "center", "color": color}
+                plt.text(point.x_value, point.y_value, point.label, fontdict=fontdict)
     
-        # Linear regression line:
         if point_set.add_regression_line:
-            slope, intercept, r_value, p_value, stderr = scipy.stats.linregress(point_set.x_values(), point_set.y_values())
+            slope, intercept, _, _, _ = scipy.stats.linregress(point_set.x_values(), point_set.y_values())
             lsrl_x_values = numpy.arange(x_min - x_range * 0.2, x_max + x_range * 0.2 + x_step / 2.0, x_step)
             lsrl_y_values = [x * slope + intercept for x in lsrl_x_values]
-            matplotlib.pyplot.plot(lsrl_x_values, lsrl_y_values, "--", c=color)
+            plt.plot(lsrl_x_values, lsrl_y_values, "--", c=color)
 
-        # Additional (custom) charting behavior:
-        if point_set.additional_charting_behavior is not None:
+        if point_set.additional_charting_behavior:
             point_set.additional_charting_behavior(point_set, x_min, x_max, x_range, x_step, y_min, y_max, y_range, color)
 
     if len(points) > 1:
-        matplotlib.pyplot.legend()
+        plt.legend()
     
-    if x_label is not None:
-        matplotlib.pyplot.xlabel(x_label)
-    if y_label is not None:
-        matplotlib.pyplot.ylabel(y_label)
-    if chart_title is not None:
-        matplotlib.pyplot.title(chart_title)
+    if x_label:
+        plt.xlabel(x_label)
+    if y_label:
+        plt.ylabel(y_label)
+    if chart_title:
+        plt.title(chart_title)
 
     if show_vs_save:
-        matplotlib.pyplot.show()
-    
+        plt.show()
     else:
-        assert(chart_title is not None)
-        assert(output_dir_path is not None)
-        file_name = "%s.pdf" % (chart_title,)
+        assert chart_title, "Chart title must be provided to save the file."
+        assert output_dir_path, "Output directory must be provided to save the file."
+        file_name = f"{chart_title}.pdf"
         file_path = os.path.join(output_dir_path, file_name)
-        matplotlib.pyplot.savefig(file_path, bbox_inches="tight")
+        plt.savefig(file_path, bbox_inches="tight")
