@@ -5,7 +5,7 @@ import numpy
 import settings
 import util
 
-DATA_DIR_PATH = os.path.join(os.path.dirname(__file__), "..", "Data")
+DATA_DIR_PATH = os.path.join(os.path.dirname(__file__), "..", "data")
 
 
 class Player:
