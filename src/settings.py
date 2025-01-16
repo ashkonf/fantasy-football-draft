@@ -1,7 +1,9 @@
-LEAGUE_SIZE = 10
-VERBOSE = True
+from typing import List
 
-TEAM_NAMES = [
+LEAGUE_SIZE: int = 10
+VERBOSE: bool = True
+
+TEAM_NAMES: List[str] = [
     "Jacksonville",
     "Minnesota",
     "Philadelphia",

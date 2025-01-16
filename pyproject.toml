@@ -9,5 +9,7 @@ dependencies = [
     "html5lib>=1.1",
     "matplotlib>=3.10.5",
     "numpy>=2.3.2",
+    "pyright>=1.1.403",
+    "ruff>=0.12.7",
     "scipy>=1.16.1",
 ]
