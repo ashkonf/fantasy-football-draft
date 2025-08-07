@@ -1,2 +1,5 @@
-def aggressively_sanitize(string):
+"""Defines utility functions."""
+
+
+def aggressively_sanitize(string: str) -> str:
     return string.replace("Â", "").replace("Ã", "")
