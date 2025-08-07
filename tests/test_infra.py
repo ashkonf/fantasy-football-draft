@@ -1,6 +1,7 @@
 import unittest
 from src.infra import Player
 
+
 class TestPlayer(unittest.TestCase):
     def test_similarity(self):
         # Test case 1: Identical names
@@ -16,8 +17,8 @@ class TestPlayer(unittest.TestCase):
         # Test case 3: Different names
         player5 = Player("Jane Smith")
         player6 = Player("John Doe")
-        self.assertEqual(player5.similarity(player6), float('inf'))
+        self.assertEqual(player5.similarity(player6), float("inf"))
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()
-

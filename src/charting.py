@@ -77,15 +77,15 @@ class ScatterPlotData(list):
         super().__init__(point_sets or [])
         for ps in self:
             assert isinstance(ps, PointSet)
-        assert len(set(ps.name for ps in self)) == len(
-            self
-        ), "Point set names must be unique"
+        assert len(set(ps.name for ps in self)) == len(self), (
+            "Point set names must be unique"
+        )
 
     def append(self, point_set: PointSet) -> None:
         assert isinstance(point_set, PointSet)
-        assert point_set.name not in [
-            ps.name for ps in self
-        ], "Point set name must be unique"
+        assert point_set.name not in [ps.name for ps in self], (
+            "Point set name must be unique"
+        )
         super().append(point_set)
 
     def add_point(self, point: Point, set_name: str) -> None:
