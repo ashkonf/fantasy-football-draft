@@ -1,5 +1,7 @@
 # Fantasy Football Draft
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A Python project for analyzing fantasy football projections and optimizing your draft strategy.
 
 ## Table of Contents
@@ -109,5 +111,4 @@ The repository includes tooling for linting, type checking, and testing. You can
 Contributions are welcome! Feel free to fork the repository and submit pull requests with improvements or new features.
 
 ## License
-
-This project is licensed under the [Apache License 2.0](LICENSE).
+This project is licensed under the [MIT License](LICENSE).
