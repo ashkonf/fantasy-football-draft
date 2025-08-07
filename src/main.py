@@ -1,6 +1,7 @@
 """Defines the main executable."""
 
 import collections
+import logging
 from typing import Any, Callable, Dict, List, Tuple
 
 import matplotlib
@@ -11,6 +12,9 @@ import charting
 import infra
 import settings
 from infra import Player
+
+
+logger = logging.getLogger(__name__)
 
 
 def build_position_map(players: List[Player]) -> Dict[str, List[Player]]:
@@ -76,16 +80,21 @@ def fit_curve(
     ]
 
     try:
-        return func, scipy.optimize.curve_fit(
-            func, filtered_x_values, filtered_y_values, maxfev=1000000
-        )[0]
-    except RuntimeError as e:
-        if settings.VERBOSE:
-            print(f"Skipping {point_set.name} because of a curve-fitting error: {e}")
-        return None, None
+        params, _ = scipy.optimize.curve_fit(
+            func,
+            filtered_x_values,
+            filtered_y_values,
+            maxfev=10000,
+        )
+    except RuntimeError as exc:
+        raise RuntimeError(f"curve fitting failed for {point_set.name}: {exc}") from exc
+
+    return func, params
 
 
 def main() -> None:
+    logging.basicConfig(level=logging.DEBUG if settings.VERBOSE else logging.INFO)
+
     players: List[Player] = infra.load_players()
 
     plot_data: charting.ScatterPlotData = charting.ScatterPlotData()
@@ -105,10 +114,16 @@ def main() -> None:
     parameters: Dict[str, Any] = {}
 
     for point_set in plot_data:
-        func, params = fit_curve(point_set)
-        if func and params is not None:
-            functions[point_set.name] = func
-            parameters[point_set.name] = params
+        try:
+            func, params = fit_curve(point_set)
+        except RuntimeError as exc:
+            logger.warning(
+                "Skipping %s due to curve-fitting error: %s", point_set.name, exc
+            )
+            continue
+
+        functions[point_set.name] = func
+        parameters[point_set.name] = params
 
         def additional_charting_behavior(
             ps: charting.PointSet,
@@ -133,10 +148,10 @@ def main() -> None:
                 func(x_value, *params) for x_value in lsrl_x_values
             ]
 
-            print(ps.name)
-            print(lsrl_x_values)
-            print(lsrl_y_values)
-            print()
+            logger.debug("%s", ps.name)
+            logger.debug("%s", lsrl_x_values)
+            logger.debug("%s", lsrl_y_values)
+            logger.debug("")
 
             # Removing points outside first quadrant
             filtered_lsrl_x_values: List[float] = [
