@@ -8,8 +8,8 @@ import bs4
 import numpy
 from bs4 import BeautifulSoup, Tag
 
-import settings
-import util
+from . import settings
+from . import util
 
 DATA_DIR_PATH: str = os.path.join(os.path.dirname(__file__), "..", "data")
 
