@@ -27,14 +27,36 @@ def build_position_map(players: List[Player]) -> Dict[str, List[Player]]:
 
 def rank_players_by_draft_value(
     draft_position: int,
-    remaining_player_names: List[str],
+    taken_player_names: List[str],
     players: List[Player],
-    fitted_function: Callable[[float], float],
+    functions: Dict[str, Tuple[Callable[..., Any], Any]],
 ) -> None:
+    """Rank remaining players by projected value.
+
+    Args:
+        draft_position: Overall pick number.
+        taken_player_names: Names of players already drafted.
+        players: The full list of available players.
+        functions: Mapping from position to the fitted curve function and
+            its learned parameters.
+    """
+
+    taken_players: List[Player] = []
+    for name in taken_player_names:
+        match: Player = infra.Player(name).find_match(players)
+        if match:
+            taken_players.append(match)
+
+    remaining_players: List[Player] = [
+        player for player in players if player not in taken_players
+    ]
+
     pairs: List[Tuple[Player, float]] = []
-    for name in remaining_player_names:
-        player: Player = infra.Player(name).find_match(players)
-        value: float = calculate_draft_value(player, draft_position, fitted_function)
+    for player in remaining_players:
+        if player.position not in functions:
+            continue
+        func, params = functions[player.position]
+        value: float = calculate_draft_value(player, draft_position, func, params)
         pairs.append((player, value))
     pairs.sort(key=lambda pair: pair[1], reverse=True)
 
@@ -45,11 +67,42 @@ def rank_players_by_draft_value(
 
 
 def calculate_draft_value(
-    player: Player, draft_position: int, fitted_function: Callable[[float], float]
+    player: Player,
+    draft_position: int,
+    func: Callable[..., Any],
+    params: Any,
 ) -> float:
-    return player.get_average_projected_ppg() - fitted_function(
-        draft_position + settings.LEAGUE_SIZE
+    """Calculate the value of drafting ``player`` at ``draft_position``.
+
+    The value is defined as the player's projected PPG minus the value predicted
+    by the position-specific curve fitted using historical draft data.
+
+    Args:
+        player: Player under consideration.
+        draft_position: Overall pick number.
+        func: The fitted function mapping draft position to projected PPG.
+        params: Learned parameters for ``func``.
+    """
+
+    return player.get_average_projected_ppg() - func(
+        draft_position + settings.LEAGUE_SIZE, *params
     )
+
+
+def find_optimal_draft_position(
+    player: Player, func: Callable[..., Any], params: Any, guess: float = 100.0
+) -> float:
+    """Return the draft position where the fitted curve matches the player's PPG."""
+
+    target_ppg: float = player.get_average_projected_ppg()
+
+    def error(x_value: float) -> float:
+        return func(x_value, *params) - target_ppg
+
+    try:
+        return float(scipy.optimize.newton(error, guess))
+    except (RuntimeError, OverflowError):
+        return float("nan")
 
 
 def fit_curve(
@@ -71,12 +124,16 @@ def fit_curve(
     x_values: List[float] = point_set.x_values()
     y_values: List[float] = point_set.y_values()
 
-    # Removing QB points that mess up function
+    # Exclude outlier QB points that negatively impact curve fitting.
     filtered_x_values: List[float] = [
-        x for i, x in enumerate(x_values) if point_set.name != "QB" or y_values[i] > 200
+        x
+        for i, x in enumerate(x_values)
+        if point_set.name != "QB" or y_values[i] >= 200
     ]
     filtered_y_values: List[float] = [
-        y for i, y in enumerate(y_values) if point_set.name != "QB" or y > 200
+        y
+        for i, y in enumerate(y_values)
+        if point_set.name != "QB" or y >= 200
     ]
 
     try:
